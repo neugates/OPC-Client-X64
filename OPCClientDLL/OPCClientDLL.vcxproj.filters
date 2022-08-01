@@ -21,7 +21,7 @@
     <ClInclude Include="pch.h">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="OPCClientLibrary.h">
+    <ClInclude Include="opc_client_interface.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>
@@ -32,7 +32,7 @@
     <ClCompile Include="pch.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="OPCClientLibrary.cpp">
+    <ClCompile Include="opc_client_interface.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>
