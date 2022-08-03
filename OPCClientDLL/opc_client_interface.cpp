@@ -2,7 +2,9 @@
 #include <algorithm>
 #include <iostream>
 #include <limits.h>
+#include <mutex>
 #include <sys\timeb.h>
+#include <thread>
 #include <utility>
 
 #include "OPCClient.h"
@@ -16,8 +18,8 @@
 
 using namespace std;
 
-using Items = map<wstring, COPCItem *>;
-using GroupTuple = tuple<COPCGroup *, Items>;
+using Items = vector<COPCItem *>;
+using GroupTuple = tuple<COPCGroup *, Items, ReadCallback>;
 
 class OPCClient : public OPCClientInterface
 {
@@ -27,9 +29,11 @@ class OPCClient : public OPCClientInterface
     bool Connect(wstring &host_name, wstring &server_name) override;
     ServerNames GetServers(wstring &host_name) override;
     ServerItems GetItems() override;
-    void AddGroup(wstring &group_name) override;
+    void AddGroup(wstring &group_name, ReadCallback callback) override;
     void AddItem(wstring &group_name, wstring &item_name) override;
-    string GetItemType(wstring &item_name) override;
+    VARENUM GetItemType(wstring &item_name) override;
+    void ReadSync(wstring &group_name) override;
+    bool WriteSync(wstring &item_name, VARIANT &var) override;
 
   private:
     wstring host_name_;
@@ -82,8 +86,8 @@ bool OPCClient::Connect(wstring &host_name, wstring &server_name)
             for (int i = 0; i < 10; i++)
             {
                 server_->getStatus(status);
-                wcout << "server state is " << server_state_msg[status.dwServerState] << ", vendor is "
-                      << status.vendorInfo.c_str() << endl;
+                // wcout << "server state is " << server_state_msg[status.dwServerState] << ", vendor is "
+                //      << status.vendorInfo.c_str() << endl;
 
                 if (status.dwServerState == OPC_STATUS_RUNNING)
                 {
@@ -110,10 +114,9 @@ bool OPCClient::Connect(wstring &host_name, wstring &server_name)
 ServerNames OPCClient::GetServers(wstring &host_name)
 {
     COPCHost *host = COPCClient::makeHost(host_name);
-    ServerNames servers;
     vector<CLSID> local_class_ids;
-    ServerNames local_servers;
-    host->getListOfDAServers(IID_CATID_OPCDAServer20, local_servers, local_class_ids);
+    ServerNames servers;
+    host->getListOfDAServers(IID_CATID_OPCDAServer20, servers, local_class_ids);
     delete host;
     return servers;
 }
@@ -125,7 +128,7 @@ ServerItems OPCClient::GetItems()
     return items;
 }
 
-void OPCClient::AddGroup(wstring &group_name)
+void OPCClient::AddGroup(wstring &group_name, ReadCallback callback)
 {
     if (groups_.end() != groups_.find(group_name))
     {
@@ -134,7 +137,7 @@ void OPCClient::AddGroup(wstring &group_name)
 
     unsigned long refresh_rate;
     COPCGroup *group = server_->makeGroup(group_name, true, 1000, refresh_rate, 0.0);
-    GroupTuple group_tuple = make_tuple(group, Items{});
+    GroupTuple group_tuple = make_tuple(group, Items{}, callback);
     groups_[group_name] = group_tuple;
 }
 
@@ -148,33 +151,98 @@ void OPCClient::AddItem(wstring &group_name, wstring &item_name)
     auto &group_tuple = groups_[group_name];
     auto &items = get<1>(group_tuple);
 
-    if (items.end() != items.find(item_name))
+    auto it = find_if(items.begin(), items.end(), [item_name](COPCItem *item) { return item->getName() == item_name; });
+
+    if (items.end() != it)
     {
         return;
     }
 
     COPCItem *item = get<0>(group_tuple)->addItem(item_name, true);
-    items[item_name] = item;
+    items.push_back(item);
 }
 
-string OPCClient::GetItemType(wstring &item_name)
+VARENUM OPCClient::GetItemType(wstring &item_name)
 {
-    for_each(groups_.begin(), groups_.end(), [item_name](auto &group_kv) {
+    VARENUM type = VT_NULL;
+    for_each(groups_.begin(), groups_.end(), [item_name, &type](auto &group_kv) {
         GroupTuple &group_tuple = group_kv.second;
         Items &items = get<1>(group_tuple);
-        if (items.end() == items.find(item_name))
-        {
-            auto item = items[item_name];
 
+        auto it =
+            find_if(items.begin(), items.end(), [item_name](COPCItem *item) { return item->getName() == item_name; });
+        if (items.end() != it)
+        {
+            auto item = *it;
             vector<CPropertyDescription> prop_desc;
             item->getSupportedProperties(prop_desc);
-            for (unsigned i = 0; i < prop_desc.size(); ++i)
-            {
-            }
+            CAutoPtrArray<SPropertyValue> prop_vals;
+            item->getProperties(prop_desc, prop_vals);
 
-            return;
+            if (prop_vals[0])
+            {
+                // wcout << "name: " << item_name << ", data type: " << prop_vals[0]->value.iVal << endl;
+                type = static_cast<VARENUM>(prop_vals[0]->value.iVal);
+            }
         }
     });
 
-    return string();
+    return type;
+}
+
+void OPCClient::ReadSync(wstring &group_name)
+{
+    if (groups_.end() == groups_.find(group_name))
+    {
+        return;
+    }
+
+    auto &group_tuple = groups_[group_name];
+    auto &group = get<0>(group_tuple);
+    auto &items = get<1>(group_tuple);
+    auto &callback = get<2>(group_tuple);
+
+    if (items.empty())
+    {
+        return;
+    }
+
+    COPCItemDataMap item_data_map;
+    group->readSync(items, item_data_map, OPC_DS_DEVICE);
+    POSITION pos = item_data_map.GetStartPosition();
+    while (pos)
+    {
+        OPCHANDLE handle = item_data_map.GetKeyAt(pos);
+        OPCItemData *data = item_data_map.GetNextValue(pos);
+        if (data)
+        {
+            const COPCItem *item = data->item();
+            if (item)
+            {
+                //printf("-----> '%ws', handle: %u, group sync read quality %d value %d\n", item->getName().c_str(),
+                //       handle, data->wQuality, data->vDataValue.iVal);
+
+                callback(item->getName(), data->vDataValue);
+            }
+        }
+    }
+
+}
+
+bool OPCClient::WriteSync(wstring &item_name, VARIANT &var)
+{
+    for_each(groups_.begin(), groups_.end(), [item_name, &var](auto &group_kv) {
+        GroupTuple &group_tuple = group_kv.second;
+        Items &items = get<1>(group_tuple);
+
+        auto it =
+            find_if(items.begin(), items.end(), [item_name](COPCItem *item) { return item->getName() == item_name; });
+        if (items.end() != it)
+        {
+            auto item = *it;
+            return item->writeSync(var);
+        }
+    });
+
+    return false;
 }
