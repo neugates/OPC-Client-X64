@@ -34,6 +34,8 @@ class OPCClient : public OPCClientInterface
     VARENUM GetItemType(wstring &item_name) override;
     void ReadSync(wstring &group_name) override;
     bool WriteSync(wstring &item_name, VARIANT &var) override;
+    void ReadAsync(std::wstring &group_nam) override;
+    void WriteAsync(std::wstring &item_name, VARIANT &var) override;
 
   private:
     wstring host_name_;
@@ -246,4 +248,14 @@ bool OPCClient::WriteSync(wstring &item_name, VARIANT &var)
     });
 
     return result;
+}
+
+void OPCClient::ReadAsync(std::wstring &group_nam)
+{
+    // TODO:
+}
+
+void OPCClient::WriteAsync(std::wstring &item_name, VARIANT &var)
+{
+    // TODO:
 }
