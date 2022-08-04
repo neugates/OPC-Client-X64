@@ -231,7 +231,8 @@ void OPCClient::ReadSync(wstring &group_name)
 
 bool OPCClient::WriteSync(wstring &item_name, VARIANT &var)
 {
-    for_each(groups_.begin(), groups_.end(), [item_name, &var](auto &group_kv) {
+    bool result{false};
+    for_each(groups_.begin(), groups_.end(), [item_name, &var, &result](auto &group_kv) {
         GroupTuple &group_tuple = group_kv.second;
         Items &items = get<1>(group_tuple);
 
@@ -240,9 +241,9 @@ bool OPCClient::WriteSync(wstring &item_name, VARIANT &var)
         if (items.end() != it)
         {
             auto item = *it;
-            return item->writeSync(var);
+            result = item->writeSync(var);
         }
     });
 
-    return false;
+    return result;
 }
