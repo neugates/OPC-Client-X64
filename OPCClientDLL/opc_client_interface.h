@@ -32,6 +32,8 @@ class OPC_CLIENT_DLL_API OPCClientInterface
     virtual VARENUM GetItemType(std::wstring &item_name) = 0;
     virtual void ReadSync(std::wstring &group_name) = 0;
     virtual bool WriteSync(std::wstring &item_name, VARIANT &var) = 0;
+    virtual void ReadAsync(std::wstring &group_nam) = 0;
+    virtual void WriteAsync(std::wstring &item_name, VARIANT &var) = 0;
 };
 
 extern "C" OPC_CLIENT_DLL_API ServerNames;
