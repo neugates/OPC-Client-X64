@@ -103,7 +103,9 @@
       <AdditionalDependencies>OPCClientToolKit32D.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>xcopy /y /d "C:\Users\0x1c\workbench\OPC-Client-X64\OPCClientDLL\Win32\Debug\OPCClientDLL.dll" "C:\Users\0x1c\workbench\opc-shift\Debug\"</Command>
+      <Command>xcopy /y /d "..\OPCClientDLL\$(IntDir)OPCClientDLL.dll" "C:\local\lib"
+xcopy /y /d "..\OPCClientDLL\$(IntDir)OPCClientDLL.lib" "C:\local\lib"
+xcopy /y /d "..\OPCClientDLL\opc_client_interface.h" "C:\local\include"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
