@@ -7,6 +7,10 @@
 #include <thread>
 #include <utility>
 
+#include <spdlog/logger.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/spdlog.h>
+
 #include "OPCClient.h"
 #include "OPCGroup.h"
 #include "OPCHost.h"
@@ -16,6 +20,12 @@
 
 #include "opc_client_interface.h"
 
+#define WS_TO_S(x) COPCHost::WS2S(x)
+#define S_TO_WS(x) COPCHost::S2WS(x)
+#define WS_TO_LPCTSTR(x) COPCHost::WS2LPCTSTR(x)
+#define S_TO_LPCTSTR(x) COPCHost::S2LPCTSTR(x)
+#define LPCSTR_TO_WS(x) COPCHost::LPCSTR2WS(x)
+
 using namespace std;
 
 using Items = vector<COPCItem *>;
@@ -24,7 +34,7 @@ using GroupTuple = tuple<COPCGroup *, Items, ReadCallback>;
 class OPCClient : public OPCClientInterface
 {
   public:
-    void Init() override;
+    void *Init(void *sinks, std::string logger_name) override;
     void Stop() override;
     bool Connect(wstring &host_name, wstring &server_name) override;
     ServerNames GetServers(wstring &host_name) override;
@@ -43,6 +53,9 @@ class OPCClient : public OPCClientInterface
     COPCHost *host_;
     COPCServer *server_;
     map<wstring, GroupTuple> groups_;
+    mutex rw_mutex_{};
+    string logger_name_;
+    shared_ptr<spdlog::logger> logger_;
 };
 
 OPCClientInterface *instance_create()
@@ -56,9 +69,28 @@ void instance_destroy(OPCClientInterface *instance)
     delete client;
 }
 
-void OPCClient::Init()
+void *OPCClient::Init(void *sinks, std::string logger_name)
 {
+    logger_name_ = logger_name;
+    vector<spdlog::sink_ptr> all_sinks = *(vector<spdlog::sink_ptr> *)sinks;
+    auto logger = spdlog::get(logger_name);
+    if (not logger)
+    {
+        if (all_sinks.size() > 0)
+        {
+            logger = make_shared<spdlog::logger>(logger_name, begin(all_sinks), end(all_sinks));
+            spdlog::register_logger(logger);
+        }
+    }
+    else
+    {
+        logger = spdlog::stdout_color_mt(logger_name);
+    }
+
     COPCClient::init();
+
+    logger_ = logger;
+    return &logger;
 }
 
 void OPCClient::Stop()
@@ -88,8 +120,8 @@ bool OPCClient::Connect(wstring &host_name, wstring &server_name)
             for (int i = 0; i < 10; i++)
             {
                 server_->getStatus(status);
-                // wcout << "server state is " << server_state_msg[status.dwServerState] << ", vendor is "
-                //      << status.vendorInfo.c_str() << endl;
+                logger_->info("server {} state is {}, info {}", WS_TO_S(server_name), server_state_msg[status.dwServerState],
+                              WS_TO_S(status.vendorInfo));
 
                 if (status.dwServerState == OPC_STATUS_RUNNING)
                 {
@@ -210,7 +242,19 @@ void OPCClient::ReadSync(wstring &group_name)
     }
 
     COPCItemDataMap item_data_map;
-    group->readSync(items, item_data_map, OPC_DS_DEVICE);
+    {
+        lock_guard<mutex> lg{rw_mutex_};
+
+        try
+        {
+            group->readSync(items, item_data_map, OPC_DS_DEVICE);
+        }
+        catch (OPCException ex)
+        {
+            return;
+        }
+    }
+
     POSITION pos = item_data_map.GetStartPosition();
     while (pos)
     {
@@ -221,20 +265,16 @@ void OPCClient::ReadSync(wstring &group_name)
             const COPCItem *item = data->item();
             if (item)
             {
-                //printf("-----> '%ws', handle: %u, group sync read quality %d value %d\n", item->getName().c_str(),
-                //       handle, data->wQuality, data->vDataValue.iVal);
-
                 callback(item->getName(), data->vDataValue);
             }
         }
     }
-
 }
 
 bool OPCClient::WriteSync(wstring &item_name, VARIANT &var)
 {
     bool result{false};
-    for_each(groups_.begin(), groups_.end(), [item_name, &var, &result](auto &group_kv) {
+    for_each(groups_.begin(), groups_.end(), [item_name, &var, &result, this](auto &group_kv) {
         GroupTuple &group_tuple = group_kv.second;
         Items &items = get<1>(group_tuple);
 
@@ -243,7 +283,17 @@ bool OPCClient::WriteSync(wstring &item_name, VARIANT &var)
         if (items.end() != it)
         {
             auto item = *it;
-            result = item->writeSync(var);
+            {
+                lock_guard<mutex> lg{rw_mutex_};
+                try
+                {
+                    result = item->writeSync(var);
+                }
+                catch (OPCException ex)
+                {
+                    result = false;
+                }
+            }
         }
     });
 
@@ -258,4 +308,19 @@ void OPCClient::ReadAsync(std::wstring &group_nam)
 void OPCClient::WriteAsync(std::wstring &item_name, VARIANT &var)
 {
     // TODO:
+}
+
+std::string OPCClientInterface::WS2S(const wstring &wstr)
+{
+    return WS_TO_S(wstr);
+}
+
+std::wstring OPCClientInterface::S2WS(const string &str)
+{
+    return S_TO_WS(str);
+}
+
+std::wstring OPCClientInterface::LPCSTR2WS(LPCSTR str)
+{
+    return LPCSTR_TO_WS(str);
 }
