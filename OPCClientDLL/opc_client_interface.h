@@ -23,7 +23,7 @@ class OPC_CLIENT_DLL_API OPCClientInterface
     {
     }
 
-    virtual void* Init(void *sinks, std::string logger_name) = 0;
+    virtual void* Init(std::string &name, void *sinks) = 0;
     virtual void Stop() = 0;
     virtual ServerNames GetServers(std::wstring &host_name) = 0;
     virtual bool Connect(std::wstring &host_name, std::wstring &server_name) = 0;

@@ -34,7 +34,7 @@ using GroupTuple = tuple<COPCGroup *, Items, ReadCallback>;
 class OPCClient : public OPCClientInterface
 {
   public:
-    void *Init(void *sinks, std::string logger_name) override;
+    void *Init(std::string &name, void *sinks) override;
     void Stop() override;
     bool Connect(wstring &host_name, wstring &server_name) override;
     ServerNames GetServers(wstring &host_name) override;
@@ -54,7 +54,7 @@ class OPCClient : public OPCClientInterface
     COPCServer *server_;
     map<wstring, GroupTuple> groups_;
     mutex rw_mutex_{};
-    string logger_name_;
+    string name_;
     shared_ptr<spdlog::logger> logger_;
 };
 
@@ -69,22 +69,22 @@ void instance_destroy(OPCClientInterface *instance)
     delete client;
 }
 
-void *OPCClient::Init(void *sinks, std::string logger_name)
+void *OPCClient::Init(std::string &name, void *sinks)
 {
-    logger_name_ = logger_name;
+    name_ = name;
     vector<spdlog::sink_ptr> all_sinks = *(vector<spdlog::sink_ptr> *)sinks;
-    auto logger = spdlog::get(logger_name);
+    auto logger = spdlog::get(name_);
     if (not logger)
     {
         if (all_sinks.size() > 0)
         {
-            logger = make_shared<spdlog::logger>(logger_name, begin(all_sinks), end(all_sinks));
+            logger = make_shared<spdlog::logger>(name_, begin(all_sinks), end(all_sinks));
             spdlog::register_logger(logger);
         }
     }
     else
     {
-        logger = spdlog::stdout_color_mt(logger_name);
+        logger = spdlog::stdout_color_mt(name_);
     }
 
     COPCClient::init();
