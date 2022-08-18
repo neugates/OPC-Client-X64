@@ -113,15 +113,28 @@ bool OPCClient::Connect(wstring &host_name, wstring &server_name)
     {
         if (local_servers[i] == server_name_)
         {
-            server_ = host_->connectDAServer(server_name_);
+            try
+            {
+                server_ = host_->connectDAServer(server_name_);
+            }
+            catch (OPCException &ex)
+            {
+                logger_->error("connect to server {} failed, msg {}", WS_TO_S(server_name_),
+                               WS_TO_S(ex.reasonString()));
+
+                delete host_;
+                host_ = nullptr;
+                return false;
+            }
+
             ServerStatus status{0};
             const char *server_state_msg[] = {"unknown",   "running", "failed",    "co-config",
                                               "suspended", "test",    "comm-fault"};
             for (int i = 0; i < 10; i++)
             {
                 server_->getStatus(status);
-                logger_->info("server {} state is {}, info {}", WS_TO_S(server_name), server_state_msg[status.dwServerState],
-                              WS_TO_S(status.vendorInfo));
+                logger_->info("server {} state is {}, info {}", WS_TO_S(server_name),
+                              server_state_msg[status.dwServerState], WS_TO_S(status.vendorInfo));
 
                 if (status.dwServerState == OPC_STATUS_RUNNING)
                 {
@@ -150,7 +163,16 @@ ServerNames OPCClient::GetServers(wstring &host_name)
     COPCHost *host = COPCClient::makeHost(host_name);
     vector<CLSID> local_class_ids;
     ServerNames servers;
-    host->getListOfDAServers(IID_CATID_OPCDAServer20, servers, local_class_ids);
+
+    try
+    {
+        host->getListOfDAServers(IID_CATID_OPCDAServer20, servers, local_class_ids);
+    }
+    catch (OPCException &ex)
+    {
+        logger_->error("get all da server from {} failed, msg {}", WS_TO_S(host_name), WS_TO_S(ex.reasonString()));
+    }
+
     delete host;
     return servers;
 }
@@ -170,7 +192,18 @@ void OPCClient::AddGroup(wstring &group_name, ReadCallback callback)
     }
 
     unsigned long refresh_rate;
-    COPCGroup *group = server_->makeGroup(group_name, true, 1000, refresh_rate, 0.0);
+
+    COPCGroup *group = nullptr;
+    try
+    {
+        group = server_->makeGroup(group_name, true, 1000, refresh_rate, 0.0);
+    }
+    catch (OPCException &ex)
+    {
+        logger_->error("add group {} failed, msg {}", WS_TO_S(group_name), WS_TO_S(ex.reasonString()));
+        return;
+    }
+
     GroupTuple group_tuple = make_tuple(group, Items{}, callback);
     groups_[group_name] = group_tuple;
 }
@@ -192,7 +225,18 @@ void OPCClient::AddItem(wstring &group_name, wstring &item_name)
         return;
     }
 
-    COPCItem *item = get<0>(group_tuple)->addItem(item_name, true);
+    COPCItem *item = nullptr;
+
+    try
+    {
+        item = get<0>(group_tuple)->addItem(item_name, true);
+    }
+    catch (OPCException &ex)
+    {
+        logger_->error("add item {} failed, msg {}", WS_TO_S(item_name), WS_TO_S(ex.reasonString()));
+        return;
+    }
+
     items.push_back(item);
 }
 
@@ -215,7 +259,6 @@ VARENUM OPCClient::GetItemType(wstring &item_name)
 
             if (prop_vals[0])
             {
-                // wcout << "name: " << item_name << ", data type: " << prop_vals[0]->value.iVal << endl;
                 type = static_cast<VARENUM>(prop_vals[0]->value.iVal);
             }
         }
@@ -249,8 +292,9 @@ void OPCClient::ReadSync(wstring &group_name)
         {
             group->readSync(items, item_data_map, OPC_DS_DEVICE);
         }
-        catch (OPCException ex)
+        catch (OPCException &ex)
         {
+            logger_->error("read group {} failed, msg {}", WS_TO_S(group_name), WS_TO_S(ex.reasonString()));
             return;
         }
     }
@@ -289,8 +333,9 @@ bool OPCClient::WriteSync(wstring &item_name, VARIANT &var)
                 {
                     result = item->writeSync(var);
                 }
-                catch (OPCException ex)
+                catch (OPCException &ex)
                 {
+                    logger_->error("write item {} failed, msg {}", WS_TO_S(item_name), WS_TO_S(ex.reasonString()));
                     result = false;
                 }
             }
