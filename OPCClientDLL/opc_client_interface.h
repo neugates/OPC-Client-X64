@@ -35,10 +35,6 @@ class OPC_CLIENT_DLL_API OPCClientInterface
     virtual bool WriteSync(std::wstring &item_name, VARIANT &var) = 0;
     virtual void ReadAsync(std::wstring &group_nam) = 0;
     virtual void WriteAsync(std::wstring &item_name, VARIANT &var) = 0;
-
-    virtual std::string WS2S(const std::wstring &wstr);
-    virtual std::wstring S2WS(const std::string &str);
-    virtual std::wstring LPCSTR2WS(LPCSTR str);
 };
 
 extern "C" OPC_CLIENT_DLL_API ServerNames;

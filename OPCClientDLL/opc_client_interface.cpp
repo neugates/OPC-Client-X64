@@ -309,18 +309,3 @@ void OPCClient::WriteAsync(std::wstring &item_name, VARIANT &var)
 {
     // TODO:
 }
-
-std::string OPCClientInterface::WS2S(const wstring &wstr)
-{
-    return WS_TO_S(wstr);
-}
-
-std::wstring OPCClientInterface::S2WS(const string &str)
-{
-    return S_TO_WS(str);
-}
-
-std::wstring OPCClientInterface::LPCSTR2WS(LPCSTR str)
-{
-    return LPCSTR_TO_WS(str);
-}
