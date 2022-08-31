@@ -34,7 +34,7 @@ using GroupTuple = tuple<COPCGroup *, Items, ReadCallback>;
 class OPCClient : public OPCClientInterface
 {
   public:
-    void *Init(void *sinks, std::string logger_name) override;
+    void *Init(std::string &name, void *sinks) override;
     void Stop() override;
     bool Connect(wstring &host_name, wstring &server_name) override;
     ServerNames GetServers(wstring &host_name) override;
@@ -54,7 +54,7 @@ class OPCClient : public OPCClientInterface
     COPCServer *server_;
     map<wstring, GroupTuple> groups_;
     mutex rw_mutex_{};
-    string logger_name_;
+    string name_;
     shared_ptr<spdlog::logger> logger_;
 };
 
@@ -69,22 +69,22 @@ void instance_destroy(OPCClientInterface *instance)
     delete client;
 }
 
-void *OPCClient::Init(void *sinks, std::string logger_name)
+void *OPCClient::Init(std::string &name, void *sinks)
 {
-    logger_name_ = logger_name;
+    name_ = name;
     vector<spdlog::sink_ptr> all_sinks = *(vector<spdlog::sink_ptr> *)sinks;
-    auto logger = spdlog::get(logger_name);
+    auto logger = spdlog::get(name_);
     if (not logger)
     {
         if (all_sinks.size() > 0)
         {
-            logger = make_shared<spdlog::logger>(logger_name, begin(all_sinks), end(all_sinks));
+            logger = make_shared<spdlog::logger>(name_, begin(all_sinks), end(all_sinks));
             spdlog::register_logger(logger);
         }
     }
     else
     {
-        logger = spdlog::stdout_color_mt(logger_name);
+        logger = spdlog::stdout_color_mt(name_);
     }
 
     COPCClient::init();
@@ -113,15 +113,28 @@ bool OPCClient::Connect(wstring &host_name, wstring &server_name)
     {
         if (local_servers[i] == server_name_)
         {
-            server_ = host_->connectDAServer(server_name_);
+            try
+            {
+                server_ = host_->connectDAServer(server_name_);
+            }
+            catch (OPCException &ex)
+            {
+                logger_->error("connect to server {} failed, msg {}", WS_TO_S(server_name_),
+                               WS_TO_S(ex.reasonString()));
+
+                delete host_;
+                host_ = nullptr;
+                return false;
+            }
+
             ServerStatus status{0};
             const char *server_state_msg[] = {"unknown",   "running", "failed",    "co-config",
                                               "suspended", "test",    "comm-fault"};
             for (int i = 0; i < 10; i++)
             {
                 server_->getStatus(status);
-                logger_->info("server {} state is {}, info {}", WS_TO_S(server_name), server_state_msg[status.dwServerState],
-                              WS_TO_S(status.vendorInfo));
+                logger_->info("server {} state is {}, info {}", WS_TO_S(server_name),
+                              server_state_msg[status.dwServerState], WS_TO_S(status.vendorInfo));
 
                 if (status.dwServerState == OPC_STATUS_RUNNING)
                 {
@@ -150,7 +163,16 @@ ServerNames OPCClient::GetServers(wstring &host_name)
     COPCHost *host = COPCClient::makeHost(host_name);
     vector<CLSID> local_class_ids;
     ServerNames servers;
-    host->getListOfDAServers(IID_CATID_OPCDAServer20, servers, local_class_ids);
+
+    try
+    {
+        host->getListOfDAServers(IID_CATID_OPCDAServer20, servers, local_class_ids);
+    }
+    catch (OPCException &ex)
+    {
+        logger_->error("get all da server from {} failed, msg {}", WS_TO_S(host_name), WS_TO_S(ex.reasonString()));
+    }
+
     delete host;
     return servers;
 }
@@ -170,7 +192,18 @@ void OPCClient::AddGroup(wstring &group_name, ReadCallback callback)
     }
 
     unsigned long refresh_rate;
-    COPCGroup *group = server_->makeGroup(group_name, true, 1000, refresh_rate, 0.0);
+
+    COPCGroup *group = nullptr;
+    try
+    {
+        group = server_->makeGroup(group_name, true, 1000, refresh_rate, 0.0);
+    }
+    catch (OPCException &ex)
+    {
+        logger_->error("add group {} failed, msg {}", WS_TO_S(group_name), WS_TO_S(ex.reasonString()));
+        return;
+    }
+
     GroupTuple group_tuple = make_tuple(group, Items{}, callback);
     groups_[group_name] = group_tuple;
 }
@@ -192,7 +225,18 @@ void OPCClient::AddItem(wstring &group_name, wstring &item_name)
         return;
     }
 
-    COPCItem *item = get<0>(group_tuple)->addItem(item_name, true);
+    COPCItem *item = nullptr;
+
+    try
+    {
+        item = get<0>(group_tuple)->addItem(item_name, true);
+    }
+    catch (OPCException &ex)
+    {
+        logger_->error("add item {} failed, msg {}", WS_TO_S(item_name), WS_TO_S(ex.reasonString()));
+        return;
+    }
+
     items.push_back(item);
 }
 
@@ -215,7 +259,6 @@ VARENUM OPCClient::GetItemType(wstring &item_name)
 
             if (prop_vals[0])
             {
-                // wcout << "name: " << item_name << ", data type: " << prop_vals[0]->value.iVal << endl;
                 type = static_cast<VARENUM>(prop_vals[0]->value.iVal);
             }
         }
@@ -249,8 +292,9 @@ void OPCClient::ReadSync(wstring &group_name)
         {
             group->readSync(items, item_data_map, OPC_DS_DEVICE);
         }
-        catch (OPCException ex)
+        catch (OPCException &ex)
         {
+            logger_->error("read group {} failed, msg {}", WS_TO_S(group_name), WS_TO_S(ex.reasonString()));
             return;
         }
     }
@@ -289,8 +333,9 @@ bool OPCClient::WriteSync(wstring &item_name, VARIANT &var)
                 {
                     result = item->writeSync(var);
                 }
-                catch (OPCException ex)
+                catch (OPCException &ex)
                 {
+                    logger_->error("write item {} failed, msg {}", WS_TO_S(item_name), WS_TO_S(ex.reasonString()));
                     result = false;
                 }
             }
@@ -308,19 +353,4 @@ void OPCClient::ReadAsync(std::wstring &group_nam)
 void OPCClient::WriteAsync(std::wstring &item_name, VARIANT &var)
 {
     // TODO:
-}
-
-std::string OPCClientInterface::WS2S(const wstring &wstr)
-{
-    return WS_TO_S(wstr);
-}
-
-std::wstring OPCClientInterface::S2WS(const string &str)
-{
-    return S_TO_WS(str);
-}
-
-std::wstring OPCClientInterface::LPCSTR2WS(LPCSTR str)
-{
-    return LPCSTR_TO_WS(str);
 }

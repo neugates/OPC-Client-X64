@@ -58,7 +58,7 @@ void COPCHost::makeCOMObjectEx(std::wstring hostName, tagCLSCTX serverLocation, 
     CW2W wstr(hostName.c_str());
     requestedServerInfo.pwszName = wstr;
     requestedServerInfo.pAuthInfo = &authn;
-    printf("server name: '%ws'\n", requestedServerInfo.pwszName);
+    //printf("server name: '%ws'\n", requestedServerInfo.pwszName);
 
     MULTI_QI reqInterface;
     reqInterface.pIID = &requestedInterface;
@@ -116,7 +116,7 @@ void COPCHost::getListOfDAServersEx(std::wstring hostName, tagCLSCTX serverLocat
                 throw OPCException(L"COPCHost::getListOfDAServersEx: FAILED to get class ID string from class ID");
             }
 
-            printf("prog ID: '%ws' - class ID: %ws\n", progID, classIDStr);
+            //printf("prog ID: '%ws' - class ID: %ws\n", progID, classIDStr);
 
             COPCClient::comFree(progID);
             COPCClient::comFree(userType);
