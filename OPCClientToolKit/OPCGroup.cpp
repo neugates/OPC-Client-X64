@@ -341,6 +341,12 @@ void COPCGroup::readSync(std::vector<COPCItem *> &items, COPCItemDataMap &itemDa
 
     delete[] handles;
     COPCClient::comFree(results);
+
+    for (unsigned i = 0; i < nbrItems; ++i)
+    {
+        VariantClear(&(states[i].vDataValue));
+    }
+
     COPCClient::comFree(states);
 
 } // COPCGroup::readSync

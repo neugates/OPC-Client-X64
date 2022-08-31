@@ -311,6 +311,8 @@ void OPCClient::ReadSync(wstring &group_name)
             {
                 callback(item->getName(), data->vDataValue);
             }
+
+            delete data;
         }
     }
 }
