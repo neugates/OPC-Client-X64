@@ -28,7 +28,9 @@
 
 using namespace std;
 
-using Items = vector<COPCItem *>;
+using COPCItems = vector<COPCItem *>;
+using Item = tuple<COPCItem *, int>;
+using Items = vector<Item>;
 using GroupTuple = tuple<COPCGroup *, Items, ReadCallback>;
 
 class OPCClient : public OPCClientInterface
@@ -46,6 +48,9 @@ class OPCClient : public OPCClientInterface
     bool WriteSync(wstring &item_name, VARIANT &var) override;
     void ReadAsync(std::wstring &group_nam) override;
     void WriteAsync(std::wstring &item_name, VARIANT &var) override;
+
+  private:
+    bool typeValidate(int &type);
 
   private:
     wstring host_name_;
@@ -218,7 +223,10 @@ void OPCClient::AddItem(wstring &group_name, wstring &item_name)
     auto &group_tuple = groups_[group_name];
     auto &items = get<1>(group_tuple);
 
-    auto it = find_if(items.begin(), items.end(), [item_name](COPCItem *item) { return item->getName() == item_name; });
+    auto it = find_if(items.begin(), items.end(), [item_name](Item &item) {
+        COPCItem *opc_item = get<0>(item);
+        return opc_item->getName() == item_name;
+    });
 
     if (items.end() != it)
     {
@@ -237,25 +245,30 @@ void OPCClient::AddItem(wstring &group_name, wstring &item_name)
         return;
     }
 
-    items.push_back(item);
+    Item item_tuple = make_tuple(item, 0);
+    items.push_back(item_tuple);
 }
 
 VARENUM OPCClient::GetItemType(wstring &item_name)
 {
     VARENUM type = VT_NULL;
-    for_each(groups_.begin(), groups_.end(), [item_name, &type](auto &group_kv) {
+    for_each(groups_.begin(), groups_.end(), [item_name, &type, this](auto &group_kv) {
         GroupTuple &group_tuple = group_kv.second;
         Items &items = get<1>(group_tuple);
 
-        auto it =
-            find_if(items.begin(), items.end(), [item_name](COPCItem *item) { return item->getName() == item_name; });
+        auto it = find_if(items.begin(), items.end(), [item_name](Item &item) {
+            COPCItem *opc_item = get<0>(item);
+            return opc_item->getName() == item_name;
+        });
+
         if (items.end() != it)
         {
             auto item = *it;
+            COPCItem *opc_item = get<0>(item);
             vector<CPropertyDescription> prop_desc;
-            item->getSupportedProperties(prop_desc);
+            opc_item->getSupportedProperties(prop_desc);
             CAutoPtrArray<SPropertyValue> prop_vals;
-            item->getProperties(prop_desc, prop_vals);
+            opc_item->getProperties(prop_desc, prop_vals);
 
             if (prop_vals[0])
             {
@@ -284,13 +297,29 @@ void OPCClient::ReadSync(wstring &group_name)
         return;
     }
 
+    COPCItems opc_items{};
+    for (auto &item : items)
+    {
+        auto opc_item = get<0>(item);
+        int type = opc_item->getDataType();
+        if (typeValidate(type))
+        {
+            opc_items.push_back(opc_item);
+        }
+    }
+
+    if (opc_items.empty())
+    {
+        return;
+    }
+
     COPCItemDataMap item_data_map;
     {
         lock_guard<mutex> lg{rw_mutex_};
 
         try
         {
-            group->readSync(items, item_data_map, OPC_DS_DEVICE);
+            group->readSync(opc_items, item_data_map, OPC_DS_DEVICE);
         }
         catch (OPCException &ex)
         {
@@ -302,7 +331,6 @@ void OPCClient::ReadSync(wstring &group_name)
     POSITION pos = item_data_map.GetStartPosition();
     while (pos)
     {
-        OPCHANDLE handle = item_data_map.GetKeyAt(pos);
         OPCItemData *data = item_data_map.GetNextValue(pos);
         if (data)
         {
@@ -311,6 +339,8 @@ void OPCClient::ReadSync(wstring &group_name)
             {
                 callback(item->getName(), data->vDataValue);
             }
+
+            VariantClear(&data->vDataValue);
         }
     }
 }
@@ -321,17 +351,20 @@ bool OPCClient::WriteSync(wstring &item_name, VARIANT &var)
     for_each(groups_.begin(), groups_.end(), [item_name, &var, &result, this](auto &group_kv) {
         GroupTuple &group_tuple = group_kv.second;
         Items &items = get<1>(group_tuple);
+        auto it = find_if(items.begin(), items.end(), [item_name](Item &item) {
+            COPCItem *opc_item = get<0>(item);
+            return opc_item->getName() == item_name;
+        });
 
-        auto it =
-            find_if(items.begin(), items.end(), [item_name](COPCItem *item) { return item->getName() == item_name; });
         if (items.end() != it)
         {
             auto item = *it;
+            COPCItem *opc_item = get<0>(item);
             {
                 lock_guard<mutex> lg{rw_mutex_};
                 try
                 {
-                    result = item->writeSync(var);
+                    result = opc_item->writeSync(var);
                 }
                 catch (OPCException &ex)
                 {
@@ -353,4 +386,34 @@ void OPCClient::ReadAsync(std::wstring &group_nam)
 void OPCClient::WriteAsync(std::wstring &item_name, VARIANT &var)
 {
     // TODO:
+}
+
+bool OPCClient::typeValidate(int &type)
+{
+    bool result{false};
+
+	switch (type)
+	{
+	case VT_I1: 
+	case VT_I2: 
+	case VT_INT:
+	case VT_I4: 
+	case VT_I8: 
+	case VT_R4: 
+	case VT_R8: 
+	case VT_UI1: 
+	case VT_UI2: 
+	case VT_UINT:
+	case VT_UI4: 
+	case VT_UI8: 
+	case VT_DATE: 
+	case VT_BSTR: 
+	case VT_BOOL: 
+        result = true;
+        break;
+	default:
+		break;
+	}
+
+    return result;
 }

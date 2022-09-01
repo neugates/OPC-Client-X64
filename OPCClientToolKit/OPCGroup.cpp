@@ -323,7 +323,7 @@ void COPCGroup::readSync(std::vector<COPCItem *> &items, COPCItemDataMap &itemDa
         throw OPCException(L"COPCGroup::readSync: sync read FAILED");
     } // if
 
-    for (unsigned i = 0; i < nbrItems; ++i)
+    for (unsigned i = 0; i < nbrItems; i++)
     {
         OPCHANDLE handle = states[i].hClient;
         OPCItemData *data = CAsyncDataCallback::makeOPCDataItem(states[i].vDataValue, states[i].wQuality,
@@ -337,6 +337,8 @@ void COPCGroup::readSync(std::vector<COPCItem *> &items, COPCItemDataMap &itemDa
         {
             itemDataMap.SetValueAt(pair, data);
         }
+
+        VariantClear(&(states[i].vDataValue));
     } // for
 
     delete[] handles;
