@@ -12,3 +12,5 @@ x64/Debug/
 *.suo
 .vs
 Debug/
+LocalSyncWrapper/Release/
+OPCClientDLL/Win32/

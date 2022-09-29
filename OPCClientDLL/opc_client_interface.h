@@ -39,6 +39,6 @@ class OPC_CLIENT_DLL_API OPCClientInterface
 
 extern "C" OPC_CLIENT_DLL_API ServerNames;
 extern "C" OPC_CLIENT_DLL_API ServerItems;
-extern "C" OPC_CLIENT_DLL_API ReadCallback;
 extern "C" OPC_CLIENT_DLL_API OPCClientInterface *instance_create();
+extern "C" OPC_CLIENT_DLL_API ReadCallback;
 extern "C" OPC_CLIENT_DLL_API void instance_destroy(OPCClientInterface *instance);
